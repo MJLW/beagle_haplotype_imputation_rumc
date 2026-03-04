@@ -1,3 +1,15 @@
 in
 out
+*.bkp
+
+1000genomes_reference
+reference_eur
+PRS*
+exome_targets
+snp_weights
+plink_env.yaml
+
+.nextflow*
+work
+test
 
