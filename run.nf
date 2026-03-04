@@ -2,8 +2,8 @@
 
 plink_grch37 = "in/plink.GRCh37.map.zip"
 ref_dir_grch37 = "in/b37.bref3/"
-#ref_prefix = "chr"
-#ref_postfix = ".1kg.phase3.v5a.b37.bref3"
+ref_prefix = "chr"
+ref_postfix = ".1kg.phase3.v5a.b37.bref3"
 
 beagle_jar = "bin/beagle.27Feb25.75f.jar"
 unbref_jar = "bin/unbref3.27Feb25.75f.jar"
@@ -62,7 +62,7 @@ process Beagle {
 
     script:
     """
-        java -jar $beagle_jar ref=$ref_dir_grch37 map=$plink_grch37 gt=$vcf out=${trio_id}.${relationship}.chr${chr_nr}.bref3
+        java -jar $beagle_jar ref=${ref_dir_grch37}/${ref_prefix}${chr_nr}${ref_postfix} map=$plink_grch37 gt=$vcf out=${trio_id}.${relationship}.chr${chr_nr}.bref3
     """
 }
 
