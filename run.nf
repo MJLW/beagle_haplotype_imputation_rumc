@@ -106,7 +106,12 @@ workflow {
     # Prepare input channel
     trio_dirs = Channel.fromPath("${input_vcf_dir}/rumc_trio_*")
     relationships = Channel.fromList(['proband', 'mother', 'father'])
-    input_vcfs = trio_dirs.cross(relationships).map {}
+    input_vcfs = trio_dirs.cross(relationships).map { trio_dir, relationship -> 
+        def trio_id = trio_dir.getName()
+        def vcf = file("${trio_dir}/${trio_id}.rescue.${relationship}.vcf.gz")
+        def vcf_csi = file("${trio_dir}/${trio_id}.rescue.${relationship}.vcf.gz.csi")
+        tuple(trio_id, relationship, vcf, vcf_csi)
+    }
 
     # Conform Radboud VCF to 1000Genomes format
     # TODO: Split unphased variants into files kept in separate channel
