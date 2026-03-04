@@ -18,7 +18,7 @@ output_dir = "/ifs/data/research/projects/juliet/projects/prs_educational_attain
 chr_map_file = "/ifs/data/research/projects/juliet/projects/prs_educational_attainment/chr_map.txt"
 
 process ConformVCF {
-    tag "$trio_id"
+    tag "${trio_id}.${relationship}"
     publishDir "${output_dir}/conformed_vcfs/${trio_id}", mode: "link"
 
     input:
@@ -32,21 +32,43 @@ process ConformVCF {
         export TMPDIR=/ifs/temp/
         module load bioinf/bcftools
 
+        echo "${trio_id}.${relationship}" > new_name.txt
+
         # Filter to autosomal chromosomes only, then remove 'chr' prefix from regions
-        bcftools view -r chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22 $vcf | bcftools annotate --rename-chrs $chr_map_file -Oz -o "${trio_id}.${relationship}.vcf.gz"
+        bcftools view -r chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22 $vcf | bcftools annotate --rename-chrs $chr_map_file | bcftools reheader -s new_name.txt -Oz -o "${trio_id}.${relationship}.vcf.gz"
         bcftools index "${trio_id}.${relationship}.vcf.gz"
     """
 }
 
-process ChromosomeSplitVCF {
-    tag "$trio_id"
-    publishDir "${output_dir}/chr_vcfs/${trio_id}", mode: "link"
+process MergeVCFs {
+    tag "$chunk_id"
+    publishDir "${output_dir}/chunked_vcfs/${chunk_id}", mode: "link"
 
     input:
-    tuple val(trio_id), val(relationship), val(chr_nr), path(vcf), path(vcf_csi)
+    tuple val(chunk_id), path(vcfs), path(vcf_csis)
 
     output:
-    tuple val(trio_id), val(relationship), val(chr_nr), path("${trio_id}.${relationship}.${chr_nr}.vcf.gz"), path("${trio_id}.${relationship}.${chr_nr}.vcf.gz.csi")
+    tuple val(chunk_id), path("${chunk_id}.vcf.gz"), path("${chunk_id}.vcf.gz.csi")
+
+    script:
+    """
+        export TMPDIR=/ifs/temp/
+        module load bioinf/bcftools
+
+        bcftools merge -Oz -o ${chunk_id}.vcf.gz $vcfs
+        bcftools index ${chunk_id}.vcf.gz
+    """
+}
+
+process ChromosomeSplitVCF {
+    tag "$chunk_id"
+    publishDir "${output_dir}/chr_vcfs/${chunk_id}", mode: "link"
+
+    input:
+    tuple val(chunk_id), val(chr_nr), path(vcf), path(vcf_csi)
+
+    output:
+    tuple val(chunk_id), val(chr_nr), path("${chunk_id}.${chr_nr}.vcf.gz"), path("${chunk_id}.${chr_nr}.vcf.gz.csi")
 
 
     script:
@@ -54,71 +76,90 @@ process ChromosomeSplitVCF {
         export TMPDIR=/ifs/temp/
         module load bioinf/bcftools
 
-        bcftools view -r $chr_nr -Oz -o ${trio_id}.${relationship}.${chr_nr}.vcf.gz $vcf
-        bcftools index ${trio_id}.${relationship}.${chr_nr}.vcf.gz
+        bcftools view -r $chr_nr -Oz -o ${chunk_id}.${chr_nr}.vcf.gz $vcf
+        bcftools index ${chunk_id}.${chr_nr}.vcf.gz
     """
 }
 
 process Beagle {
-    tag "$trio_id"
-    publishDir "${output_dir}/imputed_chr_brefs/${trio_id}", mode: "link"
+    tag "$chunk_id"
+    publishDir "${output_dir}/imputed_chr_brefs/${chunk_id}", mode: "link"
 
     input:
-    tuple val(trio_id), val(relationship), val(chr_nr), path(vcf), path(vcf_csi)
+    tuple val(chunk_id), val(chr_nr), path(vcf), path(vcf_csi)
 
     output:
-    tuple val(trio_id), val(relationship), val(chr_nr), path("${trio_id}.${relationship}.chr${chr_nr}.vcf.gz"), path("${trio_id}.${relationship}.chr${chr_nr}.vcf.gz.csi")
+    tuple val(chunk_id), val(chr_nr), path("${chunk_id}.chr${chr_nr}.vcf.gz"), path("${chunk_id}.chr${chr_nr}.vcf.gz.csi")
 
     script:
     """
         export TMPDIR=/ifs/temp/
         module load bioinf/bcftools
 
-        java -jar $beagle_jar ref=${ref_dir_grch37}/${ref_prefix}${chr_nr}${ref_postfix} map=${plink_dir_grch37}/${plink_prefix}${chr_nr}${plink_postfix} gt=$vcf out=${trio_id}.${relationship}.chr${chr_nr}
-        bcftools index ${trio_id}.${relationship}.chr${chr_nr}.vcf.gz
+        java -jar $beagle_jar ref=${ref_dir_grch37}/${ref_prefix}${chr_nr}${ref_postfix} map=${plink_dir_grch37}/${plink_prefix}${chr_nr}${plink_postfix} gt=$vcf out=${chunk_id}.chr${chr_nr}
+        bcftools index ${chunk_id}.chr${chr_nr}.vcf.gz
     """
 }
 
-process BRefToVCF {
-    tag "$trio_id"
-    publishDir "${output_dir}/imputed_chr_vcfs/${trio_id}", mode: "link"
+process MergeChromosomeChunks {
+    tag "chr${chr_nr}"
+    publishDir "${output_dir}/merged_chrs/${chr_nr}", mode: "link"
 
     input:
-    tuple val(trio_id), val(relationship), val(chr_nr), path(bref3)
+    tuple val(chr_nr), path(vcfs), path(vcf_csis)
 
     output:
-    tuple val(trio_id), val(relationship), val(chr_nr), path("${trio_id}.${relationship}.chr${chr_nr}.vcf.gz"), path("${trio_id}.${relationship}.chr${chr_nr}.vcf.gz.csi")
+    tuple val(chr_nr), path("chr${chr_nr}.vcf.gz"), path("chr${chr_nr}.vcf.gz.csi")
 
     script:
     """
         export TMPDIR=/ifs/temp/
         module load bioinf/bcftools
 
-        java -jar $unbref_jar $bref3 | bgzip > ${trio_id}.${relationship}.chr${chr_nr}.vcf.gz
-        bcftools index ${trio_id}.${relationship}.chr${chr_nr}.vcf.gz
+        bcftools merge -Oz -o chr${chr_nr}.vcf.gz $vcfs
+        bcftools index chr${chr_nr}.vcf.gz
     """
 }
 
-process CombineVCF {
-    tag "$trio_id"
-    publishDir "${output_dir}/combined_vcfs/${trio_id}", mode: "link"
+# process CombineChromosomeVCFs {
+#     tag "$chunk_id"
+#     publishDir "${output_dir}/combined_vcfs/${chunk_id}", mode: "link"
+#
+#     input:
+#     tuple val(chunk_id), val(chr_nrs), path(vcfs), path(vcfs_csi)
+#
+#     output:
+#     tuple val(chunk_id), path("${chunk_id}.vcf.gz"), path("${chunk_id}.vcf.gz.csi")
+#
+#     script:
+#     """
+#         export TMPDIR=/ifs/temp/
+#         module load bioinf/bcftools
+#
+#         # Concat and sort
+#         bcftools concat $vcfs | bcftools sort -Oz -o ${chunk_id}.vcf.gz
+#         bcftools index ${chunk_id}.vcf.gz
+#     """
+# }
 
-    input:
-    tuple val(trio_id), val(relationship), val(chr_nrs), path(vcfs), path(vcfs_csi)
-
-    output:
-    tuple val(trio_id), val(relationship), path("${trio_id}.${relationship}.vcf.gz"), path("${trio_id}.${relationship}.vcf.gz.csi")
-
-    script:
-    """
-        export TMPDIR=/ifs/temp/
-        module load bioinf/bcftools
-
-        # Concat and sort
-        bcftools concat $vcfs | bcftools sort -Oz -o ${trio_id}.${relationship}.vcf.gz
-        bcftools index ${trio_id}.${relationship}.vcf.gz
-    """
-}
+# process ExtractSampleVCFs {
+#     tag "${trio_id}.${relationship}"
+#     publishDir "${output_dir}/sample_vcfs/${trio_id}", mode: "link"
+#
+#     input:
+#     tuple val(trio_id), val(relationship), path(chunked_vcf), path(chunked_vcf_csi)
+#
+#     output:
+#     tuple val(trio_id), val(relationship), path("${trio_id}.${relationship}.vcf.gz"), path("${trio_id}.${relationship}.vcf.gz.csi")
+#
+#     script:
+#     """
+#         export TMPDIR=/ifs/temp/
+#         module load bioinf/bcftools
+#
+#         # Extract sample from 
+#     """
+# }
 
 
 workflow {
@@ -138,6 +179,13 @@ workflow {
     // TODO: Split unphased variants into files kept in separate channel
     input_vcfs | ConformVCF | set { conformed_vcfs }
 
+    def enumerator = 0
+    chunks = conformed_vcfs.collate(500).map { it -> tuple(enumerator++, *data) }
+    # chunk_mapping = chunked_vcfs.map { chunk_id, trio_ids, relationships, vcfs, vcf_csis -> tuple(chunk_id, trio_ids, relationships) }
+    chunked_vcfs = chunks.map { chunk_id, trio_ids, relationships, vcfs, vcf_csis -> chunk_id, vcfs, vcf_csis }
+
+    chunked_vcfs | MergeVCFs | set { merged_vcfs }
+
     // Add chromosome information
     chromosomes = Channel.of(1..22)
     chr_in_vcfs = conformed_vcfs.combine(chromosomes).map { trio_id, relationship, vcf, vcf_csi, chr_nr -> tuple(trio_id, relationship, chr_nr, vcf, vcf_csi) }
@@ -146,8 +194,9 @@ workflow {
     chr_in_vcfs | ChromosomeSplitVCF | Beagle | set { chr_out_vcfs }
 
     // Combine chromosome level output VCFs into whole exome output VCFs
-    grouped_chr_vcfs = chr_out_vcfs.groupTuple(by: [0,1], size: 22)
-    grouped_chr_vcfs | CombineVCF | set { out_vcfs }
+    grouped_by_chr_vcfs = chr_out_vcfs.groupTuple(by: 1)
+    grouped_by_chr_vcfs | MergeChromosomeChunks | set { merged_chr_vcfs }
+
 
     // TODO: Merge unphased variants back into output vcfs
 }
